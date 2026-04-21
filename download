@@ -1,0 +1,7 @@
+.env
+models/
+data/raw_sales.csv
+__pycache__/
+*.pyc
+.DS_Store
+venv/
