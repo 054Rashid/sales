@@ -1,0 +1,136 @@
+// ============================================================
+//  SALES BI PLATFORM — Power Query (M Language) Queries
+//  How to use:
+//    Power BI Desktop → Transform Data → Advanced Editor
+//    Paste the relevant query to replace the default one
+// ============================================================
+
+
+// ── QUERY 1: fact_sales ──────────────────────────────────────
+// Paste this in the Advanced Editor for the fact_sales table
+let
+    Source = MySQL.Database("localhost", "sales_bi", [ReturnSingleDatabase=true]),
+    sales_bi_dbo = Source{[Name="sales_bi"]}[Data],
+    fact_sales_Table = sales_bi_dbo{[Name="fact_sales"]}[Data],
+    
+    // Change column types
+    #"Changed Types" = Table.TransformColumnTypes(
+        fact_sales_Table,
+        {
+            {"sale_id",      Int64.Type},
+            {"order_id",     type text},
+            {"date_id",      Int64.Type},
+            {"product_id",   Int64.Type},
+            {"customer_id",  type text},
+            {"quantity",     Int64.Type},
+            {"unit_price",   type number},
+            {"sales_amount", type number},
+            {"discount",     type number},
+            {"net_revenue",  type number}
+        }
+    ),
+    
+    // Add a Gross Revenue column
+    #"Added Gross Revenue" = Table.AddColumn(
+        #"Changed Types",
+        "gross_revenue",
+        each [quantity] * [unit_price],
+        type number
+    ),
+    
+    // Add discount_amount column
+    #"Added Discount Amount" = Table.AddColumn(
+        #"Added Gross Revenue",
+        "discount_amount",
+        each [gross_revenue] - [net_revenue],
+        type number
+    )
+in
+    #"Added Discount Amount"
+
+
+// ── QUERY 2: dim_date ────────────────────────────────────────
+// Paste this in the Advanced Editor for the dim_date table
+let
+    Source = MySQL.Database("localhost", "sales_bi", [ReturnSingleDatabase=true]),
+    sales_bi_dbo = Source{[Name="sales_bi"]}[Data],
+    dim_date_Table = sales_bi_dbo{[Name="dim_date"]}[Data],
+    
+    #"Changed Types" = Table.TransformColumnTypes(
+        dim_date_Table,
+        {
+            {"date_id",     Int64.Type},
+            {"full_date",   type date},
+            {"year",        Int64.Type},
+            {"quarter",     Int64.Type},
+            {"month",       Int64.Type},
+            {"month_name",  type text},
+            {"week",        Int64.Type},
+            {"day_of_week", type text}
+        }
+    ),
+    
+    // Add Quarter label column (e.g. "Q1 2024")
+    #"Added Quarter Label" = Table.AddColumn(
+        #"Changed Types",
+        "quarter_label",
+        each "Q" & Text.From([quarter]) & " " & Text.From([year]),
+        type text
+    ),
+    
+    // Add month sort number (already exists but make sure it's usable)
+    #"Added Month Sort" = Table.AddColumn(
+        #"Added Quarter Label",
+        "month_sort",
+        each [year] * 100 + [month],
+        Int64.Type
+    )
+in
+    #"Added Month Sort"
+
+
+// ── QUERY 3: dim_product ─────────────────────────────────────
+let
+    Source = MySQL.Database("localhost", "sales_bi", [ReturnSingleDatabase=true]),
+    sales_bi_dbo = Source{[Name="sales_bi"]}[Data],
+    dim_product_Table = sales_bi_dbo{[Name="dim_product"]}[Data],
+    
+    #"Changed Types" = Table.TransformColumnTypes(
+        dim_product_Table,
+        {
+            {"product_id",   Int64.Type},
+            {"product_name", type text},
+            {"category",     type text}
+        }
+    )
+in
+    #"Changed Types"
+
+
+// ── QUERY 4: dim_customer ────────────────────────────────────
+let
+    Source = MySQL.Database("localhost", "sales_bi", [ReturnSingleDatabase=true]),
+    sales_bi_dbo = Source{[Name="sales_bi"]}[Data],
+    dim_customer_Table = sales_bi_dbo{[Name="dim_customer"]}[Data],
+    
+    #"Changed Types" = Table.TransformColumnTypes(
+        dim_customer_Table,
+        {
+            {"customer_id",   type text},
+            {"customer_name", type text},
+            {"region",        type text}
+        }
+    ),
+    
+    // Add region_sort for consistent ordering in charts
+    #"Added Region Sort" = Table.AddColumn(
+        #"Changed Types",
+        "region_sort",
+        each if [region] = "North" then 1
+             else if [region] = "South" then 2
+             else if [region] = "East" then 3
+             else 4,
+        Int64.Type
+    )
+in
+    #"Added Region Sort"

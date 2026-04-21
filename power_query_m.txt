@@ -1,0 +1,132 @@
+# ============================================================
+#  STEP 3 — Train ML Forecasting Model
+#  Tool : VS Code terminal
+#  Run  : python ml/forecasting.py
+# ============================================================
+
+import pandas as pd
+import numpy as np
+from sqlalchemy import create_engine
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.preprocessing import LabelEncoder
+import pickle
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+HOST     = os.getenv("DB_HOST",     "localhost")
+PORT     = os.getenv("DB_PORT",     "3306")
+USER     = os.getenv("DB_USER",     "root")
+PASSWORD = os.getenv("DB_PASSWORD", "password")
+DB_NAME  = os.getenv("DB_NAME",     "sales_bi")
+DB_URL   = f"mysql+pymysql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}"
+engine   = create_engine(DB_URL)
+
+print("="*55)
+print("  SALES BI — ML FORECASTING MODEL TRAINER")
+print("="*55)
+
+
+def load_features():
+    print("\nLoading data from MySQL...")
+    df = pd.read_sql("""
+        SELECT
+            f.quantity,
+            f.unit_price,
+            f.discount,
+            f.net_revenue,
+            d.year,
+            d.month,
+            d.quarter,
+            d.week,
+            p.category,
+            c.region
+        FROM fact_sales f
+        JOIN dim_date     d ON f.date_id     = d.date_id
+        JOIN dim_product  p ON f.product_id  = p.product_id
+        JOIN dim_customer c ON f.customer_id = c.customer_id
+    """, engine)
+    print(f"  {len(df):,} rows loaded")
+    return df
+
+
+def train_and_save():
+    df = load_features()
+
+    # Encode categoricals
+    print("\nEncoding features...")
+    le_cat = LabelEncoder()
+    le_reg = LabelEncoder()
+    df["category_enc"] = le_cat.fit_transform(df["category"])
+    df["region_enc"]   = le_reg.fit_transform(df["region"])
+
+    print(f"  Categories: {list(le_cat.classes_)}")
+    print(f"  Regions:    {list(le_reg.classes_)}")
+
+    features = [
+        "quantity","unit_price","discount",
+        "year","month","quarter","week",
+        "category_enc","region_enc"
+    ]
+    X = df[features]
+    y = df["net_revenue"]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+    print(f"\nTrain: {len(X_train):,}  |  Test: {len(X_test):,}")
+
+    print("\nTraining Gradient Boosting model...")
+    print("(This takes about 60 seconds — please wait)\n")
+
+    model = GradientBoostingRegressor(
+        n_estimators=200,
+        max_depth=5,
+        learning_rate=0.05,
+        subsample=0.8,
+        random_state=42,
+        verbose=0
+    )
+    model.fit(X_train, y_train)
+
+    # Evaluate
+    y_pred   = model.predict(X_test)
+    rmse     = np.sqrt(mean_squared_error(y_test, y_pred))
+    r2       = r2_score(y_test, y_pred)
+    rmse_pct = rmse / y_test.mean() * 100
+
+    print("="*45)
+    print(f"  R² Score : {r2:.4f}  (1.0 = perfect)")
+    print(f"  RMSE     : ₹{rmse:,.0f}")
+    print(f"  RMSE %   : {rmse_pct:.1f}% of avg sale value")
+    print("="*45)
+
+    # Feature importance
+    imp = pd.Series(model.feature_importances_, index=features).sort_values(ascending=False)
+    print("\nFeature importance (what drives predictions):")
+    for feat, val in imp.items():
+        bar = "█" * int(val * 50)
+        print(f"  {feat:15s} {bar} {val:.3f}")
+
+    # Save
+    os.makedirs("models", exist_ok=True)
+    bundle = {
+        "model":    model,
+        "le_cat":   le_cat,
+        "le_reg":   le_reg,
+        "features": features,
+        "r2":       r2,
+        "rmse_pct": rmse_pct,
+    }
+    with open("models/sales_model.pkl", "wb") as f:
+        pickle.dump(bundle, f)
+
+    print("\nModel saved → models/sales_model.pkl")
+    print("\nNext step: streamlit run dashboard/app.py")
+
+
+if __name__ == "__main__":
+    train_and_save()
